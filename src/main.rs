@@ -1,8 +1,21 @@
 // Uncomment this block to pass the first stage
 use std::{
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
+    thread,
 };
+
+fn handle_client(mut stream: TcpStream) {
+    let mut buf = [0; 512];
+    let res = String::from("+PONG\r\n");
+    loop {
+        let count = stream.read(&mut buf).unwrap();
+        if count == 0 {
+            break;
+        }
+        stream.write(res.as_bytes()).unwrap();
+    }
+}
 
 fn main() {
     // Uncomment this block to pass the first stage
@@ -11,17 +24,9 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 println!("accepted new connection");
-                let mut buf = [0; 512];
-                let res = String::from("+PONG\r\n");
-                loop {
-                    let count = stream.read(&mut buf).unwrap();
-                    if count == 0 {
-                        break;
-                    }
-                    stream.write(res.as_bytes()).unwrap();
-                }
+                thread::spawn(move || handle_client(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
