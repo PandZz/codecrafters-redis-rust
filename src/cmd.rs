@@ -4,6 +4,8 @@ use crate::frame::RESP;
 pub enum Cmd {
     Ping,
     Echo(String),
+    Set(String, String),
+    Get(String),
 }
 
 impl Cmd {
@@ -15,6 +17,24 @@ impl Cmd {
                     "echo" => {
                         if let RESP::Bulk(s) = &arr[1] {
                             Some(Cmd::Echo(s.clone()))
+                        } else {
+                            None
+                        }
+                    }
+                    "set" => {
+                        if let RESP::Bulk(key) = &arr[1] {
+                            if let RESP::Bulk(value) = &arr[2] {
+                                Some(Cmd::Set(key.clone(), value.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    "get" => {
+                        if let RESP::Bulk(key) = &arr[1] {
+                            Some(Cmd::Get(key.clone()))
                         } else {
                             None
                         }

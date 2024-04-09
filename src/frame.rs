@@ -72,12 +72,16 @@ impl RESP {
         }
     }
 
-    pub fn new_bulk(str: String) -> RESP {
+    pub fn new_bulk(str: String) -> Self {
         RESP::Bulk(str)
     }
 
-    pub fn new_simple(str: String) -> RESP {
+    pub fn new_simple(str: String) -> Self {
         RESP::Simple(str)
+    }
+
+    pub fn new_null() -> Self {
+        RESP::Null
     }
 }
 
