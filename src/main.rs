@@ -2,13 +2,15 @@
 use redis_starter_rust::{cmd::Cmd, frame::RESP};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
-    thread,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
 };
 
-type ShardedDb = Arc<Vec<Mutex<HashMap<String, RESP>>>>;
+type ShardedDb = Arc<Vec<Mutex<HashMap<String, (RESP, u128)>>>>;
 
 fn hash(s: &str) -> usize {
     const MOD: usize = 1e9 as usize + 7;
@@ -24,67 +26,69 @@ fn new_sharded_db(num_shards: usize) -> ShardedDb {
     Arc::new(db)
 }
 
-fn handle_client(mut stream: TcpStream, db: ShardedDb) {
+async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
     let mut buf = [0; 512];
     let pong_res = RESP::new_simple("PONG".to_string()).to_string();
     loop {
-        let count = stream.read(&mut buf).unwrap();
+        let count = stream.read(&mut buf).await.unwrap();
         if count == 0 {
             break;
         }
         if let Some((_, resp)) = RESP::read_next_resp(&buf) {
             if let Some(cmd) = Cmd::from(&resp) {
-                match cmd {
-                    Cmd::Ping => {
-                        stream.write_all(pong_res.as_bytes()).unwrap();
-                    }
-                    Cmd::Echo(s) => {
-                        stream
-                            .write_all(RESP::new_bulk(s).to_string().as_bytes())
-                            .unwrap();
-                    }
-                    Cmd::Set(key, value) => {
+                let response = match cmd {
+                    Cmd::Ping => pong_res.to_owned(),
+                    Cmd::Echo(s) => RESP::new_bulk(s).to_string(),
+                    Cmd::Set(key, value, mut expire_time) => {
                         let shard = hash(&key) % db.len();
+                        let now_millis = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
                         let mut db = db[shard].lock().unwrap();
-                        db.insert(key, RESP::new_bulk(value));
-                        stream
-                            .write_all(RESP::new_simple("OK".to_string()).to_string().as_bytes())
-                            .unwrap();
+                        if expire_time != u128::MAX {
+                            expire_time = expire_time + now_millis
+                        }
+                        db.insert(key, (RESP::new_bulk(value), expire_time));
+                        RESP::new_simple("OK".to_string()).to_string()
                     }
                     Cmd::Get(key) => {
                         let shard = hash(&key) % db.len();
-                        let db = db[shard].lock().unwrap();
-                        if let Some(value) = db.get(&key) {
-                            stream.write_all(value.to_string().as_bytes()).unwrap();
+                        let now_millis = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+                        let mut db = db[shard].lock().unwrap();
+                        if let Some((value, expire_time)) = db.get(&key) {
+                            if now_millis < *expire_time {
+                                value.to_string()
+                            } else {
+                                db.remove(&key);
+                                RESP::new_null().to_string()
+                            }
                         } else {
-                            stream
-                                .write_all(RESP::new_null().to_string().as_bytes())
-                                .unwrap();
+                            RESP::new_null().to_string()
                         }
                     }
-                }
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
             }
         }
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Uncomment this block to pass the first stage
     //
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     let db = new_sharded_db(32);
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                println!("accepted new connection");
-                let db = db.clone();
-                thread::spawn(move || handle_client(stream, db));
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
+        println!("accepted new connection");
+        let db = db.clone();
+        tokio::spawn(handle_client(stream, db));
     }
 }
