@@ -71,6 +71,14 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
                             RESP::new_null().to_string()
                         }
                     }
+                    Cmd::Info(rep) => {
+                        if rep == "replication" {
+                            RESP::new_bulk("role:master".to_string()).to_string()
+                        } else {
+                            RESP::new_null().to_string()
+                        }
+                    }
+                    _ => RESP::new_null().to_string(),
                 };
                 stream.write_all(response.as_bytes()).await.unwrap();
             }

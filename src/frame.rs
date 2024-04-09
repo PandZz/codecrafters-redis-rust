@@ -25,7 +25,11 @@ impl RESP {
                 i += 2;
                 Some((
                     i,
-                    RESP::Simple(String::from_utf8_lossy(&src[1..i - 2]).to_string()),
+                    RESP::Simple(
+                        String::from_utf8_lossy(&src[1..i - 2])
+                            .to_string()
+                            .to_lowercase(),
+                    ),
                 ))
             }
             b'$' => {
@@ -46,7 +50,11 @@ impl RESP {
                 } else {
                     Some((
                         i + len + 2,
-                        RESP::Bulk(String::from_utf8_lossy(&src[i..i + len]).to_string()),
+                        RESP::Bulk(
+                            String::from_utf8_lossy(&src[i..i + len])
+                                .to_string()
+                                .to_lowercase(),
+                        ),
                     ))
                 }
             }
@@ -100,7 +108,7 @@ impl Display for RESP {
                 Ok(())
             }
             RESP::Null => write!(f, "$-1\r\n"),
-            RESP::Boolean(b) => write!(f, ":{}\r\n", if *b { 1 } else { 0 }),
+            RESP::Boolean(b) => write!(f, ":{}\r\n", if *b { 't' } else { 'f' }),
             RESP::Double(d) => write!(f, ":{}\r\n", d),
             RESP::BigNumber(n) => write!(f, ":{}\r\n", n),
             RESP::Verbatim(v) => write!(f, "+{}\r\n", v),
@@ -148,5 +156,21 @@ mod resp_test {
                 RESP::Bulk("bar".to_string())
             ])
         );
+    }
+
+    #[test]
+    fn test_another_array() {
+        let src = b"*4\r\n$5\r\napple\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n123\r\n";
+        let (_, resp) = RESP::read_next_resp(src).unwrap();
+        println!("resp: {}", resp);
+        assert_eq!(
+            resp,
+            RESP::Array(vec![
+                RESP::Bulk("apple".to_string()),
+                RESP::Bulk("banana".to_string()),
+                RESP::Bulk("px".to_string()),
+                RESP::Bulk("123".to_string()),
+            ])
+        )
     }
 }

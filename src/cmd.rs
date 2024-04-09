@@ -6,6 +6,8 @@ pub enum Cmd {
     Echo(String),
     Set(String, String, u128),
     Get(String),
+    Info(String),
+    Incomplete,
 }
 
 impl Cmd {
@@ -22,37 +24,40 @@ impl Cmd {
                         }
                     }
                     "set" => {
-                        if let RESP::Bulk(key) = &arr[1] {
-                            if let RESP::Bulk(value) = &arr[2] {
-                                if let (Some(RESP::Bulk(px)), Some(RESP::Bulk(millis_str))) =
-                                    (arr.get(3), arr.get(4))
-                                {
-                                    if px == "px" {
-                                        Some(Cmd::Set(
-                                            key.clone(),
-                                            value.clone(),
-                                            millis_str.parse().unwrap(),
-                                        ))
-                                    } else {
-                                        None
-                                    }
+                        if let (RESP::Bulk(key), RESP::Bulk(value)) = (&arr[1], &arr[2]) {
+                            if let (Some(RESP::Bulk(px)), Some(RESP::Bulk(millis_str))) =
+                                (arr.get(3), arr.get(4))
+                            {
+                                if px == "px" {
+                                    Some(Cmd::Set(
+                                        key.clone(),
+                                        value.clone(),
+                                        millis_str.parse().unwrap(),
+                                    ))
                                 } else {
-                                    Some(Cmd::Set(key.clone(), value.clone(), u128::MAX))
+                                    None
                                 }
                             } else {
-                                None
+                                Some(Cmd::Set(key.clone(), value.clone(), u128::MAX))
                             }
                         } else {
                             None
                         }
                     }
-                    "get" => {
-                        if let RESP::Bulk(key) = &arr[1] {
+                    "get" => arr.get(1).and_then(|resp| {
+                        if let RESP::Bulk(key) = resp {
                             Some(Cmd::Get(key.clone()))
                         } else {
                             None
                         }
-                    }
+                    }),
+                    "info" => arr.get(1).map_or(Some(Cmd::Info("".to_string())), |resp| {
+                        if let RESP::Bulk(rep) = resp {
+                            Some(Cmd::Info(rep.clone()))
+                        } else {
+                            Some(Cmd::Info("".to_string()))
+                        }
+                    }),
                     _ => None,
                 }
             } else {
