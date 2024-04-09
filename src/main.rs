@@ -2,6 +2,7 @@
 use redis_starter_rust::{cmd::Cmd, frame::RESP};
 use std::{
     collections::HashMap,
+    env,
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -47,7 +48,7 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
                             .as_millis();
                         let mut db = db[shard].lock().unwrap();
                         if expire_time != u128::MAX {
-                            expire_time = expire_time + now_millis
+                            expire_time += now_millis
                         }
                         db.insert(key, (RESP::new_bulk(value), expire_time));
                         RESP::new_simple("OK".to_string()).to_string()
@@ -79,9 +80,18 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
 
 #[tokio::main]
 async fn main() {
-    // Uncomment this block to pass the first stage
-    //
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let mut args = env::args();
+    args.next();
+    let port = match (args.next(), args.next()) {
+        (Some(s), Some(port)) if &s == "--port" => match port.parse() {
+            Ok(p) => p,
+            Err(_) => 6379,
+        },
+        _ => 6379,
+    };
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .unwrap();
 
     let db = new_sharded_db(32);
 
