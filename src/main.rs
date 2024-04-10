@@ -95,10 +95,46 @@ async fn handle_master(config: Arc<Config>) {
     let mut stream = TcpStream::connect(format!("{}:{}", config.master_host, config.master_port))
         .await
         .unwrap();
+    let mut buf = [0; 512];
+    // 1.1 send "PING" to master
     stream
         .write_all(Cmd::new_ping_resp().to_string().as_bytes())
         .await
         .unwrap();
+    // 1.2 receive "PONG" from master
+    stream.read(&mut buf).await.unwrap();
+    assert_eq!(
+        RESP::read_next_resp(&buf).unwrap().1,
+        RESP::new_simple("pong".to_string())
+    );
+    // 2.1 send "REPLCONF listening-port <PORT>" to master
+    stream
+        .write_all(
+            format!(
+                "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n",
+                config.port
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    // 2.2 receive "OK" from master
+    stream.read(&mut buf).await.unwrap();
+    assert_eq!(
+        RESP::read_next_resp(&buf).unwrap().1,
+        RESP::new_simple("ok".to_string())
+    );
+    // 2.3 send "REPLCONF capa psync2" to master
+    stream
+        .write_all(format!("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n",).as_bytes())
+        .await
+        .unwrap();
+    // 2.4 receive "OK" from master
+    stream.read(&mut buf).await.unwrap();
+    assert_eq!(
+        RESP::read_next_resp(&buf).unwrap().1,
+        RESP::new_simple("ok".to_string())
+    );
 }
 
 #[tokio::main]
