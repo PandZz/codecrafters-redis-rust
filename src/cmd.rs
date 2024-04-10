@@ -67,6 +67,9 @@ impl Cmd {
             None
         }
     }
+    pub fn new_ping_resp() -> RESP {
+        RESP::Array(vec![RESP::Bulk("ping".to_string())])
+    }
 }
 
 #[cfg(test)]

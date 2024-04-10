@@ -90,10 +90,27 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>
     }
 }
 
+async fn handle_master(config: Arc<Config>) {
+    // handshake
+    let mut stream = TcpStream::connect(format!("{}:{}", config.master_host, config.master_port))
+        .await
+        .unwrap();
+    stream
+        .write_all(Cmd::new_ping_resp().to_string().as_bytes())
+        .await
+        .unwrap();
+}
+
 #[tokio::main]
 async fn main() {
     let args = env::args();
     let config = Arc::new(Config::from_args(args));
+
+    if config.role.as_str() == "slave" {
+        let config = config.clone();
+        tokio::spawn(handle_master(config));
+    }
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", config.port))
         .await
         .unwrap();
