@@ -1,6 +1,7 @@
 pub mod cmd;
 pub mod frame;
 
+#[derive(Debug)]
 pub struct Config {
     pub port: u32,
     pub master_host: String,
@@ -8,6 +9,12 @@ pub struct Config {
     pub role: String,
     pub master_replid: String,
     pub master_repl_offset: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Config {
@@ -29,9 +36,8 @@ impl Config {
             match x.as_str() {
                 "--port" => {
                     let port = args.next().and_then(|s| s.parse().ok());
-                    match port {
-                        Some(port) => config.port = port,
-                        None => (),
+                    if let Some(port) = port {
+                        config.port = port
                     }
                 }
                 "--replicaof" => {
@@ -39,10 +45,7 @@ impl Config {
                         Some(host) => host,
                         None => config.master_host,
                     };
-                    config.master_port = match args.next().and_then(|s| s.parse().ok()) {
-                        Some(port) => port,
-                        None => 0,
-                    };
+                    config.master_port = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                     if config.master_port != 0 {
                         config.role = "slave".to_string();
                         config.master_replid = "?".to_string();

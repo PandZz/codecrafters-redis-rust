@@ -59,6 +59,7 @@ impl RESP {
                 }
             }
             b'*' => {
+                // println!("frame arr:{}", String::from_utf8_lossy(src));
                 let mut len = 0;
                 while src[i] != b'\r' {
                     len = len * 10 + (src[i] - b'0') as usize;
@@ -88,8 +89,8 @@ impl RESP {
         RESP::Simple(str)
     }
 
-    pub fn new_null() -> Self {
-        RESP::Null
+    pub fn new_null() -> &'static Self {
+        &(RESP::Null)
     }
 }
 
@@ -162,7 +163,7 @@ mod resp_test {
     fn test_another_array() {
         let src = b"*4\r\n$5\r\napple\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n123\r\n";
         let (_, resp) = RESP::read_next_resp(src).unwrap();
-        println!("resp: {}", resp);
+        // println!("resp: {}", resp);
         assert_eq!(
             resp,
             RESP::Array(vec![
