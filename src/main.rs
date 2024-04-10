@@ -1,5 +1,5 @@
 // Uncomment this block to pass the first stage
-use redis_starter_rust::{cmd::Cmd, frame::RESP};
+use redis_starter_rust::{cmd::Cmd, frame::RESP, Config};
 use std::{
     collections::HashMap,
     env,
@@ -27,7 +27,7 @@ fn new_sharded_db(num_shards: usize) -> ShardedDb {
     Arc::new(db)
 }
 
-async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
+async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>) {
     let mut buf = [0; 512];
     let pong_res = RESP::new_simple("PONG".to_string()).to_string();
     loop {
@@ -73,7 +73,7 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
                     }
                     Cmd::Info(rep) => {
                         if rep == "replication" {
-                            RESP::new_bulk("role:master".to_string()).to_string()
+                            RESP::new_bulk(format!("role:{}", config.role)).to_string()
                         } else {
                             RESP::new_null().to_string()
                         }
@@ -88,16 +88,9 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb) {
 
 #[tokio::main]
 async fn main() {
-    let mut args = env::args();
-    args.next();
-    let port = match (args.next(), args.next()) {
-        (Some(s), Some(port)) if &s == "--port" => match port.parse() {
-            Ok(p) => p,
-            Err(_) => 6379,
-        },
-        _ => 6379,
-    };
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+    let args = env::args();
+    let config = Arc::new(Config::from_args(args));
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", config.port))
         .await
         .unwrap();
 
@@ -107,6 +100,7 @@ async fn main() {
         let (stream, _) = listener.accept().await.unwrap();
         println!("accepted new connection");
         let db = db.clone();
-        tokio::spawn(handle_client(stream, db));
+        let config = config.clone();
+        tokio::spawn(handle_client(stream, db, config));
     }
 }
