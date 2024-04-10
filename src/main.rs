@@ -135,6 +135,12 @@ async fn handle_master(config: Arc<Config>) {
         RESP::read_next_resp(&buf).unwrap().1,
         RESP::new_simple("ok".to_string())
     );
+    // 2.5 send "PSYNC ? -1" to master
+    stream
+        .write_all(format!("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n",).as_bytes())
+        .await
+        .unwrap();
+    // TODO: 2.6 receive "+FULLRESYNC <REPL_ID> 0\r\n" from master
 }
 
 #[tokio::main]

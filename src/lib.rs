@@ -45,6 +45,7 @@ impl Config {
                     };
                     if config.master_port != 0 {
                         config.role = "slave".to_string();
+                        config.master_replid = "?".to_string();
                     }
                 }
                 _ => (),
