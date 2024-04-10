@@ -15,6 +15,8 @@ use tokio::{
 
 type ShardedDb = Arc<Vec<Mutex<HashMap<String, (RESP, u128)>>>>;
 
+static EMPTY_RDB_HEX: &'static str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+
 fn hash(s: &str) -> usize {
     const MOD: usize = 1e9 as usize + 7;
     const P: usize = 26;
@@ -29,7 +31,37 @@ fn new_sharded_db(num_shards: usize) -> ShardedDb {
     Arc::new(db)
 }
 
+fn hex2bytes(src: &str) -> Vec<u8> {
+    let mut hex_bytes: Vec<_> = src
+        .as_bytes()
+        .iter()
+        .map(|&c| {
+            if b'0' <= c && c <= b'9' {
+                c - b'0'
+            } else {
+                c - b'a' + 10
+            }
+        })
+        .collect();
+    if hex_bytes.len() % 2 != 0 {
+        hex_bytes.push(0);
+    }
+    hex_bytes
+        .chunks(2)
+        .map(|pair| match pair.len() {
+            2 => pair[0] * 16 + pair[1],
+            1 => pair[0] * 16,
+            _ => 0,
+        })
+        .collect()
+}
+
 async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Mutex<Config>>) {
+    let resp_null_bytes = RESP::Null.to_string();
+    let resp_null_bytes = resp_null_bytes.as_bytes();
+    let empty_rdb_bytes = hex2bytes(EMPTY_RDB_HEX);
+    let front = format!("${}\r\n", empty_rdb_bytes.len());
+    let empty_rdb_bytes = vec![front.into_bytes(), empty_rdb_bytes].concat();
     let mut buf = [0; 512];
     loop {
         let count = stream.read(&mut buf).await.unwrap();
@@ -38,9 +70,13 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Mutex<C
         }
         if let Some((_, resp)) = RESP::read_next_resp(&buf) {
             if let Some(cmd) = Cmd::from(&resp) {
+                let res;
                 let response = match cmd {
-                    Cmd::Ping => "+PONG\r\n".to_string(),
-                    Cmd::Echo(s) => RESP::new_bulk(s).to_string(),
+                    Cmd::Ping => "+PONG\r\n".as_bytes(),
+                    Cmd::Echo(s) => {
+                        res = RESP::new_bulk(s).to_string();
+                        res.as_bytes()
+                    }
                     Cmd::Set(key, value, mut expire_time) => {
                         let shard = hash(&key) % db.len();
                         let now_millis = SystemTime::now()
@@ -52,7 +88,8 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Mutex<C
                             expire_time += now_millis
                         }
                         db.insert(key, (RESP::new_bulk(value), expire_time));
-                        RESP::new_simple("OK".to_string()).to_string()
+                        res = RESP::new_simple("OK".to_string()).to_string();
+                        res.as_bytes()
                     }
                     Cmd::Get(key) => {
                         let shard = hash(&key) % db.len();
@@ -63,42 +100,51 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Mutex<C
                         let mut db = db[shard].lock().await;
                         if let Some((value, expire_time)) = db.get(&key) {
                             if now_millis < *expire_time {
-                                value.to_string()
+                                res = value.to_string();
+                                res.as_bytes()
                             } else {
                                 db.remove(&key);
-                                RESP::new_null().to_string()
+                                resp_null_bytes
                             }
                         } else {
-                            RESP::new_null().to_string()
+                            resp_null_bytes
                         }
                     }
                     Cmd::Info(rep) => {
                         if rep == "replication" {
                             let read_config = config.lock().await;
                             println!("info config:{:?}", read_config);
-                            RESP::new_bulk(format!(
+                            res = RESP::new_bulk(format!(
                                 "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
                                 read_config.role,
                                 read_config.master_replid,
                                 read_config.master_repl_offset
                             ))
-                            .to_string()
+                            .to_string();
+                            res.as_bytes()
                         } else {
-                            RESP::new_null().to_string()
+                            resp_null_bytes
                         }
                     }
-                    Cmd::ReplConf => "+OK\r\n".to_string(),
+                    Cmd::ReplConf => "+OK\r\n".as_bytes(),
                     Cmd::Psync(repl_id, offset) => {
                         if repl_id.as_str() == "?" && offset == -1 {
                             let read_config = config.lock().await;
-                            format!("+FULLRESYNC {} 0\r\n", read_config.master_replid)
+                            stream
+                                .write_all(
+                                    format!("+FULLRESYNC {} 0\r\n", read_config.master_replid)
+                                        .as_bytes(),
+                                )
+                                .await
+                                .unwrap();
+                            &empty_rdb_bytes
                         } else {
-                            RESP::new_null().to_string()
+                            resp_null_bytes
                         }
                     }
-                    _ => RESP::new_null().to_string(),
+                    _ => resp_null_bytes,
                 };
-                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.write_all(response).await.unwrap();
             }
         }
     }
