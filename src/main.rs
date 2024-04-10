@@ -73,7 +73,11 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>
                     }
                     Cmd::Info(rep) => {
                         if rep == "replication" {
-                            RESP::new_bulk(format!("role:{}", config.role)).to_string()
+                            RESP::new_bulk(format!(
+                                "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
+                                config.role, config.master_replid, config.master_repl_offset
+                            ))
+                            .to_string()
                         } else {
                             RESP::new_null().to_string()
                         }

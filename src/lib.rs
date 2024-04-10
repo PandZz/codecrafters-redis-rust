@@ -6,6 +6,8 @@ pub struct Config {
     pub master_host: String,
     pub master_port: u32,
     pub role: String,
+    pub master_replid: String,
+    pub master_repl_offset: usize,
 }
 
 impl Config {
@@ -15,6 +17,10 @@ impl Config {
             master_host: "".to_string(),
             master_port: 0,
             role: "master".to_string(),
+            // 40 character alphanumeric string
+            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+            // starts from 0
+            master_repl_offset: 0,
         }
     }
     pub fn from_args(mut args: std::env::Args) -> Self {
