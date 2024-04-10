@@ -7,6 +7,7 @@ pub enum Cmd {
     Set(String, String, u128),
     Get(String),
     Info(String),
+    ReplConf,
     Incomplete,
 }
 
@@ -58,6 +59,7 @@ impl Cmd {
                             Some(Cmd::Info("".to_string()))
                         }
                     }),
+                    "replconf" => Some(Cmd::ReplConf),
                     _ => None,
                 }
             } else {

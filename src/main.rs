@@ -29,7 +29,6 @@ fn new_sharded_db(num_shards: usize) -> ShardedDb {
 
 async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>) {
     let mut buf = [0; 512];
-    let pong_res = RESP::new_simple("PONG".to_string()).to_string();
     loop {
         let count = stream.read(&mut buf).await.unwrap();
         if count == 0 {
@@ -38,7 +37,7 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>
         if let Some((_, resp)) = RESP::read_next_resp(&buf) {
             if let Some(cmd) = Cmd::from(&resp) {
                 let response = match cmd {
-                    Cmd::Ping => pong_res.to_owned(),
+                    Cmd::Ping => "+PONG\r\n".to_string(),
                     Cmd::Echo(s) => RESP::new_bulk(s).to_string(),
                     Cmd::Set(key, value, mut expire_time) => {
                         let shard = hash(&key) % db.len();
@@ -82,6 +81,7 @@ async fn handle_client(mut stream: TcpStream, db: ShardedDb, config: Arc<Config>
                             RESP::new_null().to_string()
                         }
                     }
+                    Cmd::ReplConf => "+OK\r\n".to_string(),
                     _ => RESP::new_null().to_string(),
                 };
                 stream.write_all(response.as_bytes()).await.unwrap();
