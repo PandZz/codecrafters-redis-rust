@@ -25,7 +25,7 @@ async fn main() {
     let (cmd_tx, cmd_rx) = mpsc::channel(512);
     let replica_tx_list: ShardedTxList = Arc::new(Mutex::new(Vec::new()));
 
-    tokio::spawn(handle_trans_write_cmd(cmd_rx, replica_tx_list.clone()));
+    tokio::spawn(trans_write_cmd(cmd_rx, replica_tx_list.clone()));
     loop {
         // 若当前服务器为master, 则: 在n个stream中有m个是客户端, n - m个是slave服务器, 需要将客户端发来的"write"命令转发到slave服务器
         // 若当前服务器为slave, 则: 在此处的stream全都是客户端, 无需特殊处理

@@ -70,7 +70,7 @@ pub async fn handle_replica(mut stream: TcpStream, mut rx: Receiver<Vec<u8>>) {
     }
 }
 
-pub async fn handle_trans_write_cmd(mut cmd_rx: CmdReceiver, tx_list: ShardedTxList) {
+pub async fn trans_write_cmd(mut cmd_rx: CmdReceiver, tx_list: ShardedTxList) {
     loop {
         if let Some(cmd) = cmd_rx.recv().await {
             let tx_list = tx_list.lock().await;
@@ -131,6 +131,7 @@ pub async fn handle_client(
                             .unwrap()
                             .as_millis();
                         let mut db = db[shard].lock().await;
+                        println!("handle_client get db:{:?}", db);
                         if let Some((value, expire_time)) = db.get(&key) {
                             if now_millis < *expire_time {
                                 res = value.to_string();
