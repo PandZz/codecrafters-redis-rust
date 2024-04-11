@@ -1,5 +1,6 @@
 pub mod cmd;
 pub mod frame;
+pub mod server;
 
 #[derive(Debug)]
 pub struct Config {
