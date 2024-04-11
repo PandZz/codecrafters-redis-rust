@@ -74,7 +74,7 @@ pub async fn handle_trans_write_cmd(mut cmd_rx: CmdReceiver, tx_list: ShardedTxL
     loop {
         if let Some(cmd) = cmd_rx.recv().await {
             let tx_list = tx_list.lock().await;
-            let cmd: Vec<_> = cmd.to_string().bytes().collect();
+            let cmd = cmd.to_string().into_bytes();
             for tx in tx_list.iter() {
                 tx.send(cmd.clone()).await.unwrap();
             }
@@ -91,13 +91,15 @@ pub async fn handle_client(
 ) {
     let resp_null_bytes = RESP::Null.to_string();
     let resp_null_bytes = resp_null_bytes.as_bytes();
-    let mut buf = [0; 512];
+    let mut buf = [0; 1024];
     loop {
+        let mut i = 0;
         let count = stream.read(&mut buf).await.unwrap();
         if count == 0 {
             break;
         }
-        if let Some((_, resp)) = RESP::read_next_resp(&buf) {
+        while let Some((j, resp)) = RESP::read_next_resp(&buf[i..]) {
+            i += j;
             if let Some(cmd) = Cmd::from(&resp) {
                 let mut is_write_cmd = false;
                 let res;
@@ -177,7 +179,7 @@ pub async fn handle_client(
                         let (tx, rx) = mpsc::channel(32);
                         tx_list.lock().await.push(tx);
                         tokio::spawn(handle_replica(stream, rx));
-                        break;
+                        return;
                     }
                     _ => resp_null_bytes,
                 };
@@ -185,6 +187,9 @@ pub async fn handle_client(
                 if is_write_cmd {
                     write_cmd_tx.send(resp).await.unwrap();
                 }
+            }
+            if i > count {
+                break;
             }
         }
     }
@@ -195,7 +200,7 @@ pub async fn handshake(config: Arc<Mutex<Config>>) -> Result<TcpStream> {
     // handshake
     let mut stream =
         TcpStream::connect(format!("{}:{}", config.master_host, config.master_port)).await?;
-    let mut buf = [0; 512];
+    let mut buf = [0; 1024];
     println!("Begin handshake");
     // 1.1 send "PING" to master
     stream
@@ -239,13 +244,18 @@ pub async fn handshake(config: Arc<Mutex<Config>>) -> Result<TcpStream> {
     stream
         .write_all("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".as_bytes())
         .await?;
-    // 3.2 receive "+FULLRESYNC <REPL_ID> 0\r\n" from master
+    // 3.2 receive "+FULLRESYNC <REPL_ID> 0\r\n" and RDB file from master
     stream.read(&mut buf).await?;
+    /* println!(
+        "handshake: received FULLRESYNC:{:?}",
+        String::from_utf8_lossy(&buf)
+    ); */
     let res = RESP::read_next_resp(&buf).unwrap().1;
-    if let Some(Cmd::FullSync(repl_id, offset)) = Cmd::from(&res) {
+    println!("handshake FULLRESYNC resp:{}", res.to_string());
+    if let Some(Cmd::FullReSync(repl_id, offset)) = Cmd::from(&res) {
         config.master_replid = repl_id;
         config.master_repl_offset = offset;
-        println!("handshake: REPLCONF finished");
+        println!("handshake: receive FULLRESYNC and RDB file finished");
         Ok(stream)
     } else {
         Err(anyhow!(
@@ -258,13 +268,15 @@ pub async fn handle_master(config: Arc<Mutex<Config>>, db: ShardedDb) -> Result<
     if config.lock().await.role.as_str() == "slave" {
         let mut stream = handshake(config.clone()).await?;
         println!("slave: handshake has finished, listening from master begins");
-        let mut buf = [0; 512];
+        let mut buf = [0; 1024];
         loop {
             let count = stream.read(&mut buf).await.unwrap();
+            let mut i = 0;
             if count == 0 {
                 break;
             }
-            if let Some((_, resp)) = RESP::read_next_resp(&buf) {
+            while let Some((j, resp)) = RESP::read_next_resp(&buf[i..]) {
+                i += j;
                 if let Some(cmd) = Cmd::from(&resp) {
                     match cmd {
                         Cmd::Set(key, value, mut expire_time) => {
@@ -278,9 +290,13 @@ pub async fn handle_master(config: Arc<Mutex<Config>>, db: ShardedDb) -> Result<
                                 expire_time += now_millis
                             }
                             db.insert(key, (RESP::new_bulk(value), expire_time));
+                            // println!("handle_master db:{:?}", &db);
                         }
                         _ => (),
                     };
+                }
+                if i > count {
+                    break;
                 }
             }
         }

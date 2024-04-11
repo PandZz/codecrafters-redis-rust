@@ -17,65 +17,97 @@ pub enum RESP {
 impl RESP {
     pub fn read_next_resp(src: &[u8]) -> Option<(usize, RESP)> {
         let mut i = 1;
-        match src[0] {
-            b'+' => {
-                while src[i] != b'\r' {
-                    i += 1;
-                }
-                i += 2;
-                Some((
-                    i,
-                    RESP::Simple(
-                        String::from_utf8_lossy(&src[1..i - 2])
-                            .to_string()
-                            .to_lowercase(),
-                    ),
-                ))
-            }
-            b'$' => {
-                let mut len = 0;
-                let is_negative = if src[1] == b'-' {
-                    i += 1;
-                    true
-                } else {
-                    false
-                };
-                while src[i] != b'\r' {
-                    len = len * 10 + (src[i] - b'0') as usize;
-                    i += 1;
-                }
-                i += 2;
-                if is_negative {
-                    Some((i, RESP::Null))
-                } else {
-                    Some((
-                        i + len + 2,
-                        RESP::Bulk(
-                            String::from_utf8_lossy(&src[i..i + len])
-                                .to_string()
-                                .to_lowercase(),
-                        ),
-                    ))
-                }
-            }
-            b'*' => {
-                // println!("frame arr:{}", String::from_utf8_lossy(src));
-                let mut len = 0;
-                while src[i] != b'\r' {
-                    len = len * 10 + (src[i] - b'0') as usize;
-                    i += 1;
-                }
-                i += 2;
-                let mut arr = Vec::with_capacity(len);
-                for _ in 0..len {
-                    if let Some((j, resp)) = RESP::read_next_resp(&src[i..]) {
-                        i += j;
-                        arr.push(resp);
+        match src.first() {
+            Some(b'+') => {
+                while let Some(c) = src.get(i) {
+                    if *c != b'\r' {
+                        i += 1
                     } else {
-                        return None;
+                        break;
                     }
                 }
-                Some((i, RESP::Array(arr)))
+                match src.get(i) {
+                    Some(c) if *c == b'\r' => {
+                        i += 2;
+                        Some((
+                            i,
+                            RESP::Simple(
+                                String::from_utf8_lossy(&src[1..i - 2])
+                                    .to_string()
+                                    .to_lowercase(),
+                            ),
+                        ))
+                    }
+                    _ => None,
+                }
+            }
+            Some(b'$') => {
+                let mut len = 0;
+                let is_negative = match src.get(1) {
+                    Some(c) => {
+                        if *c == b'-' {
+                            i += 1;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => return None,
+                };
+                while let Some(c) = src.get(i) {
+                    if *c != b'\r' {
+                        len = len * 10 + (src[i] - b'0') as usize;
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                match src.get(i) {
+                    Some(c) if *c == b'\r' => {
+                        i += 2;
+                        if is_negative {
+                            Some((i, RESP::Null))
+                        } else {
+                            Some((
+                                i + len + 2,
+                                RESP::Bulk(
+                                    String::from_utf8_lossy(&src[i..i + len])
+                                        .to_string()
+                                        .to_lowercase(),
+                                ),
+                            ))
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            Some(b'*') => {
+                // println!("frame arr:{}", String::from_utf8_lossy(src));
+                let mut len = 0;
+                while let Some(c) = src.get(i) {
+                    if *c != b'\r' {
+                        len = len * 10 + (src[i] - b'0') as usize;
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                match src.get(i) {
+                    Some(c) if *c == b'\r' => {
+                        i += 2;
+                        let mut arr = Vec::with_capacity(len);
+                        for _ in 0..len {
+                            if let Some((j, resp)) = RESP::read_next_resp(&src[i..]) {
+                                i += j;
+                                arr.push(resp);
+                            } else {
+                                return None;
+                            }
+                        }
+                        Some((i, RESP::Array(arr)))
+                    }
+                    _ => None,
+                }
             }
             _ => None,
         }
@@ -123,10 +155,13 @@ mod resp_test {
 
     #[test]
     fn test_simple_string() {
-        let src = b"+OK\r\n";
+        let src = b"+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0\r\n";
         let (len, resp) = RESP::read_next_resp(src).unwrap();
-        assert_eq!(len, 5);
-        assert_eq!(resp, RESP::Simple("OK".to_string()));
+        assert_eq!(len, 56);
+        assert_eq!(
+            resp,
+            RESP::Simple("fullresync 75cd7bc10c49047e0d163660f3b90625b1af31dc 0".to_string())
+        );
     }
 
     #[test]
@@ -173,5 +208,23 @@ mod resp_test {
                 RESP::Bulk("123".to_string()),
             ])
         )
+    }
+
+    #[test]
+    fn test_multiple_resp() {
+        let mut i = 0;
+        let src = b"*4\r\n$5\r\napple\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n123\r\n*4\r\n$5\r\napple\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n123\r\n";
+        while let Some((_i, resp)) = RESP::read_next_resp(&src[i..]) {
+            i += _i;
+            assert_eq!(
+                resp,
+                RESP::Array(vec![
+                    RESP::Bulk("apple".to_string()),
+                    RESP::Bulk("banana".to_string()),
+                    RESP::Bulk("px".to_string()),
+                    RESP::Bulk("123".to_string()),
+                ])
+            )
+        }
     }
 }

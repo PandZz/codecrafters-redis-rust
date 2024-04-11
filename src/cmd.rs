@@ -9,7 +9,7 @@ pub enum Cmd {
     Info(String),
     ReplConf,
     Psync(String, i64),
-    FullSync(String, usize),
+    FullReSync(String, usize),
     Incomplete,
 }
 
@@ -85,11 +85,15 @@ impl Cmd {
                 }
             }
             RESP::Simple(s) => {
-                if s.starts_with("fullsync") {
-                    let mut iter = s.split_ascii_whitespace();
+                // FULLRESYNC
+                // println!("Cmd from RESP::Simple:{}", s);
+                if s.starts_with("fullresync") {
+                    let mut iter = s.split_whitespace();
+                    iter.next();
                     if let (Some(repl_id), Some(off_str)) = (iter.next(), iter.next()) {
+                        // println!("repl_id:{}, off_str:{}", repl_id, off_str);
                         match off_str.parse() {
-                            Ok(off) => Some(Cmd::FullSync(repl_id.to_string(), off)),
+                            Ok(off) => Some(Cmd::FullReSync(repl_id.to_string(), off)),
                             Err(_) => None,
                         }
                     } else {
@@ -124,5 +128,18 @@ mod cmd_test {
             RESP::Bulk("hello".to_string()),
         ]);
         assert_eq!(Cmd::from(&frame), Some(Cmd::Echo("hello".to_string())));
+    }
+
+    #[test]
+    fn test_fullresync() {
+        let frame =
+            RESP::Simple("fullresync 75cd7bc10c49047e0d163660f3b90625b1af31dc 0".to_string());
+        assert_eq!(
+            Cmd::from(&frame),
+            Some(Cmd::FullReSync(
+                "75cd7bc10c49047e0d163660f3b90625b1af31dc".to_string(),
+                0
+            ))
+        );
     }
 }
