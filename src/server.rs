@@ -25,6 +25,7 @@ pub type ShardedTxList = ShardedT<Vec<ReplicaSender>>;
 pub type ShardedConfig = ShardedT<Config>;
 
 static EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+static EMPTY_RDB_BYTES: OnceCell<Bytes> = OnceCell::const_new();
 static RESP_NULL_BYTES: OnceCell<Bytes> = OnceCell::const_new();
 
 fn hash(s: &str) -> usize {
@@ -178,15 +179,27 @@ pub async fn handle_client(
                                 )
                                 .await
                                 .unwrap();
-                            let empty_rdb_bytes = hex2bytes(EMPTY_RDB_HEX);
-                            let front = format!("${}\r\n", empty_rdb_bytes.len());
-                            let empty_rdb_bytes = [front.into_bytes(), empty_rdb_bytes].concat();
-                            stream.write_all(&empty_rdb_bytes).await.unwrap();
+                            let empty_rdb_bytes = EMPTY_RDB_BYTES
+                                .get_or_init(|| async {
+                                    let empty_rdb_bytes = hex2bytes(EMPTY_RDB_HEX);
+                                    let front = format!("${}\r\n", empty_rdb_bytes.len());
+                                    Bytes::from([front.into_bytes(), empty_rdb_bytes].concat())
+                                })
+                                .await;
+                            stream.write_all(empty_rdb_bytes).await.unwrap();
                         }
                         let (tx, rx) = mpsc::channel(32);
                         tx_list.write().await.push(tx);
                         tokio::spawn(handle_replica(stream, rx));
                         return;
+                    }
+                    Cmd::Wait(_numreplicas, _timeout) => {
+                        if _numreplicas == 0 {
+                            res = RESP::Integer(0).to_string();
+                            res.as_bytes()
+                        } else {
+                            resp_null_bytes
+                        }
                     }
                     _ => resp_null_bytes,
                 };

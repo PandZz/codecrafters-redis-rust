@@ -10,6 +10,7 @@ pub enum Cmd {
     ReplConf(String, String),
     Psync(String, i64),
     FullReSync(String, usize),
+    Wait(usize, u128),
     Incomplete,
 }
 
@@ -81,6 +82,23 @@ impl Cmd {
                                 match master_repl_offset.parse() {
                                     Ok(offset) => Some(Cmd::Psync(master_replid.clone(), offset)),
                                     Err(_) => None,
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        "wait" => {
+                            if let (
+                                Some(RESP::Bulk(numreplicas_str)),
+                                Some(RESP::Bulk(timeout_str)),
+                            ) = (arr.get(1), arr.get(2))
+                            {
+                                if let (Ok(numreplicas), Ok(timeout)) =
+                                    (numreplicas_str.parse(), timeout_str.parse())
+                                {
+                                    Some(Cmd::Wait(numreplicas, timeout))
+                                } else {
+                                    None
                                 }
                             } else {
                                 None

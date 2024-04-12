@@ -141,7 +141,7 @@ impl RESP {
 impl Display for RESP {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RESP::Integer(i) => write!(f, ":{}", i),
+            RESP::Integer(i) => write!(f, ":{:+}\r\n", i),
             RESP::Simple(s) => write!(f, "+{}\r\n", s),
             RESP::Error(e) => write!(f, "-{}\r\n", e),
             RESP::Bulk(b) => write!(f, "${}\r\n{}\r\n", b.len(), b),
@@ -153,10 +153,10 @@ impl Display for RESP {
                 Ok(())
             }
             RESP::Null => write!(f, "$-1\r\n"),
-            RESP::Boolean(b) => write!(f, ":{}\r\n", if *b { 't' } else { 'f' }),
-            RESP::Double(d) => write!(f, ":{}\r\n", d),
-            RESP::BigNumber(n) => write!(f, ":{}\r\n", n),
-            RESP::Verbatim(v) => write!(f, "+{}\r\n", v),
+            RESP::Boolean(b) => write!(f, "#{}\r\n", if *b { 't' } else { 'f' }),
+            RESP::Double(d) => write!(f, ",{}\r\n", d),
+            RESP::BigNumber(n) => write!(f, "({}\r\n", n),
+            RESP::Verbatim(v) => write!(f, "={}\r\ntxt:{}\r\n", v.len(), v),
             RESP::RDBFile(bytes) => write!(f, "${}\r\n{:?}", bytes.len(), bytes),
         }
     }
