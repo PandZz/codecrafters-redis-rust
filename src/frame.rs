@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use bytes::Bytes;
+
 #[derive(Debug, PartialEq)]
 pub enum RESP {
     Integer(i64),
@@ -12,6 +14,7 @@ pub enum RESP {
     Double(f64),
     BigNumber(i128),
     Verbatim(String),
+    RDBFile(Bytes),
 }
 
 impl RESP {
@@ -68,14 +71,23 @@ impl RESP {
                         if is_negative {
                             Some((i, RESP::Null))
                         } else {
-                            Some((
-                                i + len + 2,
-                                RESP::Bulk(
-                                    String::from_utf8_lossy(&src[i..i + len])
-                                        .to_string()
-                                        .to_lowercase(),
-                                ),
-                            ))
+                            // 取末尾可能存在的\r\n
+                            match src.get(i + len) {
+                                // Bulk String
+                                Some(c) if *c == b'\r' => Some((
+                                    i + len + 2,
+                                    RESP::Bulk(
+                                        String::from_utf8_lossy(&src[i..i + len])
+                                            .to_string()
+                                            .to_lowercase(),
+                                    ),
+                                )),
+                                // 取不到值或者取到的不是'\r', 为RDB File
+                                _ => Some((
+                                    i + len,
+                                    RESP::RDBFile(Bytes::copy_from_slice(&src[i..i + len])),
+                                )),
+                            }
                         }
                     }
                     _ => None,
@@ -121,8 +133,8 @@ impl RESP {
         RESP::Simple(str)
     }
 
-    pub fn new_null() -> &'static Self {
-        &(RESP::Null)
+    pub fn new_cmd_array(strs: Vec<String>) -> Self {
+        RESP::Array(strs.into_iter().map(RESP::new_bulk).collect())
     }
 }
 
@@ -145,6 +157,7 @@ impl Display for RESP {
             RESP::Double(d) => write!(f, ":{}\r\n", d),
             RESP::BigNumber(n) => write!(f, ":{}\r\n", n),
             RESP::Verbatim(v) => write!(f, "+{}\r\n", v),
+            RESP::RDBFile(bytes) => write!(f, "${}\r\n{:?}", bytes.len(), bytes),
         }
     }
 }

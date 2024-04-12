@@ -7,7 +7,7 @@ pub enum Cmd {
     Set(String, String, u128),
     Get(String),
     Info(String),
-    ReplConf,
+    ReplConf(String, String),
     Psync(String, i64),
     FullReSync(String, usize),
     Incomplete,
@@ -63,7 +63,15 @@ impl Cmd {
                                 Some(Cmd::Info("".to_string()))
                             }
                         }),
-                        "replconf" => Some(Cmd::ReplConf),
+                        "replconf" => {
+                            if let (Some(RESP::Bulk(a)), Some(RESP::Bulk(b))) =
+                                (arr.get(1), arr.get(2))
+                            {
+                                Some(Cmd::ReplConf(a.clone(), b.clone()))
+                            } else {
+                                None
+                            }
+                        }
                         "psync" => {
                             if let (
                                 Some(RESP::Bulk(master_replid)),

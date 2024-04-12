@@ -3,27 +3,27 @@ use redis_starter_rust::{server::*, Config};
 use std::{env, sync::Arc};
 use tokio::{
     net::TcpListener,
-    sync::{mpsc, Mutex},
+    sync::{mpsc, RwLock},
 };
 
 #[tokio::main]
 async fn main() {
     let args = env::args();
-    let config = Arc::new(Mutex::new(Config::from_args(args)));
+    let config = Arc::new(RwLock::new(Config::from_args(args)));
     let db = new_sharded_db(32);
 
     // 只有当前服务器为slave时, 这里能连接到1个master服务器, 在这里接收到的"write"命令只需静默执行
     tokio::spawn(handle_master(config.clone(), db.clone()));
 
     let listener = {
-        let read_config = config.lock().await;
+        let read_config = config.read().await;
         TcpListener::bind(format!("127.0.0.1:{}", read_config.port))
             .await
             .unwrap()
     };
 
     let (cmd_tx, cmd_rx) = mpsc::channel(512);
-    let replica_tx_list: ShardedTxList = Arc::new(Mutex::new(Vec::new()));
+    let replica_tx_list: ShardedTxList = Arc::new(RwLock::new(Vec::new()));
 
     tokio::spawn(trans_write_cmd(cmd_rx, replica_tx_list.clone()));
     loop {
