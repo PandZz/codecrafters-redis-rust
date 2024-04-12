@@ -154,7 +154,7 @@ pub async fn handle_client(
                     Cmd::Info(rep) => {
                         if rep == "replication" {
                             let read_config = config.read().await;
-                            println!("info config:{:?}", read_config);
+                            // println!("info config:{:?}", read_config);
                             res = RESP::new_bulk(format!(
                                 "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
                                 read_config.role,
@@ -266,13 +266,13 @@ async fn handshake(
             "3.2 receive \"+FULLRESYNC <REPL_ID> 0\r\n\" and RDB file from master failed"
         ));
     }
-    let res = RESP::read_next_resp(buf).unwrap().1;
+    let (len, res) = RESP::read_next_resp(buf).unwrap();
     println!("handshake FULLRESYNC resp:{}", res);
     if let Some(Cmd::FullReSync(repl_id, offset)) = Cmd::from(&res) {
         config.master_replid = repl_id;
         config.master_repl_offset = offset;
         println!("handshake: receive FULLRESYNC and RDB file finished");
-        Ok((offset, final_count))
+        Ok((len, final_count))
     } else {
         Err(anyhow!(
             "failed in 2.6 receive \"+FULLRESYNC <REPL_ID> 0\r\n\" from master"
@@ -288,11 +288,14 @@ async fn handle_master_loop(
     mut count: usize,
     db: ShardedDb,
 ) -> Result<()> {
+    let mut total_len = 0;
     loop {
-        while let Some((j, resp)) = RESP::read_next_resp(&buf[offset..]) {
-            offset += j;
+        while let Some((len, resp)) = RESP::read_next_resp(&buf[offset..]) {
+            offset += len;
             if let Some(cmd) = Cmd::from(&resp) {
+                // println!("handle_master_loop: receive cmd:{:?}", &cmd);
                 match cmd {
+                    // 这里只处理需要回显的命令
                     Cmd::Set(key, value, mut expire_time) => {
                         let shard = hash(&key) % db.len();
                         let now_millis = SystemTime::now()
@@ -304,20 +307,22 @@ async fn handle_master_loop(
                             expire_time += now_millis
                         }
                         write_db.insert(key, (RESP::new_bulk(value), expire_time));
-                        println!("handle_master db:{:?}", &write_db);
+                        // println!("handle_master db:{:?}", &write_db);
                     }
                     Cmd::ReplConf(r#type, arg) => {
                         if &r#type == "getack" && &arg == "*" {
                             let res = RESP::new_cmd_array(vec![
                                 "REPLCONF".to_string(),
                                 "ACK".to_string(),
-                                "0".to_string(),
+                                total_len.to_string(),
                             ]);
                             stream.write_all(res.to_string().as_bytes()).await?;
                         }
                     }
                     _ => (),
                 };
+                // 即使不回显的命令也需要记录其长度
+                total_len += len;
             }
             if offset > count {
                 break;
