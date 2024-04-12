@@ -93,6 +93,7 @@ pub async fn handle_client(
     config: ShardedConfig,
     tx_list: ShardedTxList,
     write_cmd_tx: CmdSender,
+    num_replica: Arc<RwLock<usize>>,
 ) {
     let resp_null_bytes = RESP_NULL_BYTES
         .get_or_init(|| async { Bytes::from(RESP::Null.to_string()) })
@@ -190,16 +191,14 @@ pub async fn handle_client(
                         }
                         let (tx, rx) = mpsc::channel(32);
                         tx_list.write().await.push(tx);
+                        let mut num = num_replica.write().await;
+                        *num += 1;
                         tokio::spawn(handle_replica(stream, rx));
                         return;
                     }
                     Cmd::Wait(_numreplicas, _timeout) => {
-                        if _numreplicas == 0 {
-                            res = RESP::Integer(0).to_string();
-                            res.as_bytes()
-                        } else {
-                            resp_null_bytes
-                        }
+                        res = RESP::Integer(*num_replica.read().await as i64).to_string();
+                        res.as_bytes()
                     }
                     _ => resp_null_bytes,
                 };

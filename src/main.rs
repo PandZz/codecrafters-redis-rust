@@ -24,6 +24,7 @@ async fn main() {
 
     let (cmd_tx, cmd_rx) = mpsc::channel(512);
     let replica_tx_list: ShardedTxList = Arc::new(RwLock::new(Vec::new()));
+    let num_replica = Arc::new(RwLock::new(0));
 
     tokio::spawn(trans_write_cmd(cmd_rx, replica_tx_list.clone()));
     loop {
@@ -35,6 +36,14 @@ async fn main() {
         let config = config.clone();
         let replica_tx_list = replica_tx_list.clone();
         let cmd_tx = cmd_tx.clone();
-        tokio::spawn(handle_client(stream, db, config, replica_tx_list, cmd_tx));
+        let num_replica = num_replica.clone();
+        tokio::spawn(handle_client(
+            stream,
+            db,
+            config,
+            replica_tx_list,
+            cmd_tx,
+            num_replica,
+        ));
     }
 }
